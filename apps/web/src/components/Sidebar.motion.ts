@@ -1,4 +1,16 @@
+import { useState } from "react";
+
+import { useMediaQuery } from "../hooks/useMediaQuery";
+
 const motionTiming = { duration: 150, easing: "ease-out" };
+// A settled row pops, then shrinks away in place. Only the detached clone animates.
+const settleExitTiming = { duration: 320, easing: "cubic-bezier(0.4, 0, 0.6, 1)" };
+const settleExitKeyframes = (opacity: number): Keyframe[] => [
+  { opacity, transform: "scale(1)" },
+  { opacity, transform: "scale(1.03)", offset: 0.25 },
+  { opacity: 0, transform: "translateX(16px) scale(0.85)" },
+];
+const NO_KEYS: ReadonlySet<string> = new Set();
 const rowTravel = (height: number) => Math.min(height, 40);
 // Fades clone removed rows and animate clones and entries; intervening layout reads force reflows.
 const MAX_FADED_ROWS_PER_UPDATE = 40;
@@ -21,6 +33,11 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
   const entering = new Map<HTMLElement, { animation: Animation; travel: number }>();
   const exiting = new Map<HTMLElement, Animation>();
+  // Settle exits by thread key, so a row that returns (undo, failed settle) drops its ghost.
+  const settleExits = new Map<string, HTMLElement>();
+  // Requested settles. A removal plays the settle exit until a pass sees the thread settled, since
+  // an accepted settle can resolve before React commits the removal.
+  const settleIntents = new Set<string>();
   let released: Map<HTMLElement, number> | null = null;
 
   const remainingOffset = (node: HTMLElement) => {
@@ -36,8 +53,22 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     for (const node of exiting.keys()) node.remove();
     entering.clear();
     exiting.clear();
+    settleExits.clear();
   };
-  const fadeOut = (node: HTMLElement, position: RowPosition, travel: number) => {
+  const dropSettleExit = (key: string) => {
+    const clone = settleExits.get(key);
+    if (clone === undefined) return;
+    exiting.get(clone)?.cancel();
+    exiting.delete(clone);
+    settleExits.delete(key);
+    clone.remove();
+  };
+  const fadeOut = (
+    node: HTMLElement,
+    position: RowPosition,
+    travel: number,
+    settleKey: string | null,
+  ) => {
     if (position.height === 0) return;
     const clone = node.cloneNode(true) as HTMLElement;
     for (const element of [clone, ...clone.querySelectorAll("*")]) {
@@ -70,19 +101,29 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     parent.append(clone);
     const entry = entering.get(node);
     const entryProgress = entry ? progress(entry.animation) : 1;
-    const animation = clone.animate(
-      [
-        { opacity: entryProgress, transform: "translateY(0px)" },
-        { opacity: 0, transform: `translateY(${travel}px)` },
-      ],
-      motionTiming,
-    );
+    const animation =
+      settleKey === null
+        ? clone.animate(
+            [
+              { opacity: entryProgress, transform: "translateY(0px)" },
+              { opacity: 0, transform: `translateY(${travel}px)` },
+            ],
+            motionTiming,
+          )
+        : clone.animate(settleExitKeyframes(entryProgress), settleExitTiming);
     exiting.set(clone, animation);
+    if (settleKey !== null) {
+      dropSettleExit(settleKey);
+      settleExits.set(settleKey, clone);
+    }
     animation.addEventListener(
       "finish",
       () => {
         clone.remove();
         exiting.delete(clone);
+        if (settleKey !== null && settleExits.get(settleKey) === clone) {
+          settleExits.delete(settleKey);
+        }
       },
       { once: true },
     );
@@ -118,7 +159,14 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
 
   return {
-    update(animate: boolean) {
+    /** Plays the settle exit, not the fade, when this thread's row leaves before it shows settled. */
+    expectSettleExit(key: string) {
+      if (!disposed) settleIntents.add(key);
+    },
+    cancelSettleExit(key: string) {
+      settleIntents.delete(key);
+    },
+    update(animate: boolean, settledKeys: ReadonlySet<string> = NO_KEYS) {
       if (disposed) return;
       const next = new Map(
         Array.from(parent.children)
@@ -170,10 +218,23 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (previousTop === undefined || previousTop === position.top) continue;
           movedDelta.set(node, previousTop + remainingOffset(node) - position.top);
         }
+        const listedKeys = new Set<string>();
+        for (const node of next.keys()) {
+          const key = node.dataset.threadItem;
+          if (key === undefined) continue;
+          listedKeys.add(key);
+          dropSettleExit(key);
+        }
         for (const [node, position] of positions!) {
           if (next.has(node)) continue;
           const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
-          fadeOut(node, position, delta === undefined ? rowTravel(position.height) : -delta);
+          const key = node.dataset.threadItem;
+          fadeOut(
+            node,
+            position,
+            delta === undefined ? rowTravel(position.height) : -delta,
+            key !== undefined && settleIntents.has(key) && !listedKeys.has(key) ? key : null,
+          );
         }
       }
       for (const [node, entry] of entering) {
@@ -226,6 +287,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         }
         released = null;
       }
+      for (const key of settleIntents) if (settledKeys.has(key)) settleIntents.delete(key);
       positions = next;
     },
     release() {
@@ -240,7 +302,41 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     suspend,
     dispose() {
       suspend();
+      settleIntents.clear();
       disposed = true;
+    },
+  };
+}
+
+type SidebarListMotion = ReturnType<typeof createSidebarListMotion>;
+type SettleOutcome = "failed" | "stayed" | "advanced";
+
+/**
+ * Settle's destroy motion: the row plays the settle exit, and the open thread stays out of the
+ * collapsed Settled shelf until navigation leaves it. Disabled or under reduced motion, settle
+ * behaves exactly as without it.
+ */
+export function useSettleExit(input: {
+  readonly enabled: boolean;
+  readonly routeRowThreadKey: string | null;
+}) {
+  const { enabled, routeRowThreadKey } = input;
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [exitingRouteKey, setExitingRouteKey] = useState<string | null>(null);
+  if (exitingRouteKey !== null && exitingRouteKey !== routeRowThreadKey) setExitingRouteKey(null);
+  return {
+    /** The thread the collapsed Settled shelf keeps: the open one, unless it is exiting. */
+    settledShelfRouteKey: exitingRouteKey === routeRowThreadKey ? null : routeRowThreadKey,
+    /** Call only for a thread not yet settled, so the exit cannot outlive its settle. */
+    begin(motion: SidebarListMotion | null, threadKey: string, leavesRoute: boolean) {
+      if (!enabled || reducedMotion) return;
+      motion?.expectSettleExit(threadKey);
+      if (leavesRoute) setExitingRouteKey(threadKey);
+    },
+    end(motion: SidebarListMotion | null, threadKey: string, outcome: SettleOutcome) {
+      if (outcome === "advanced") return;
+      if (outcome === "failed") motion?.cancelSettleExit(threadKey);
+      setExitingRouteKey((key) => (key === threadKey ? null : key));
     },
   };
 }
