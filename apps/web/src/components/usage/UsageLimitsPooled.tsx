@@ -730,8 +730,7 @@ function MoveButtons({
     <>
       <Button
         variant="ghost-muted"
-        size="icon-sm"
-        className="pointer-coarse:size-11"
+        size="icon-sm-touch"
         aria-label={up}
         title={up}
         aria-disabled={position === 0}
@@ -741,8 +740,7 @@ function MoveButtons({
       </Button>
       <Button
         variant="ghost-muted"
-        size="icon-sm"
-        className="pointer-coarse:size-11"
+        size="icon-sm-touch"
         aria-label={down}
         title={down}
         aria-disabled={position === count - 1}
@@ -851,9 +849,8 @@ function ToggleLimitVisibility({
   const action = hidden ? gt("Show {label}", { label }) : gt("Hide {label}", { label });
   return (
     <Button
-      size="icon-sm"
+      size="icon-sm-touch"
       variant="ghost-muted"
-      className="pointer-coarse:size-11"
       aria-label={action}
       title={action}
       onClick={onToggle}

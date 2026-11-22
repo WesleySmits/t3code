@@ -38,6 +38,7 @@ import {
 
 import { cn } from "../../lib/utils";
 import { usePrimarySettings } from "../../hooks/useSettings";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { resolveHour12 } from "../../timestampFormat";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentPresentations } from "../../state/presentation";
@@ -264,8 +265,11 @@ export function UsagePage() {
     else setEditingLimits(false);
     updatePreferences({ metric: nextMetric });
   };
-  const updateLimitsLayout = (limitsLayout: UsageLimitsLayout) =>
-    updatePreferences({ limitsLayout });
+  const updateLimitsLayout = useStableCallback((limitsLayout: UsageLimitsLayout) =>
+    updatePreferences({ limitsLayout }),
+  );
+  const resetLimitsLayout = useStableCallback(() => updatePreferences({ limitsLayout: undefined }));
+  const toggleEditingLimits = useStableCallback(() => setEditingLimits((editing) => !editing));
   const finishEditingLimits = () => {
     if (!editingLimits) return false;
     setEditingLimits(false);
@@ -275,6 +279,7 @@ export function UsagePage() {
     button?.focus();
     return true;
   };
+  const onLimitsEscape = useStableCallback(finishEditingLimits);
   const refreshLimits = (automatic = false) =>
     // Settled so the timestamp still advances when a refresh throws.
     settlePromise(() =>
@@ -406,7 +411,7 @@ export function UsagePage() {
             variant="ghost"
             aria-label={resetLimitsLayoutLabel}
             title={resetLimitsLayoutLabel}
-            onClick={() => updatePreferences({ limitsLayout: undefined })}
+            onClick={resetLimitsLayout}
           >
             <RotateCcwIcon className="@4xl/usage-header:hidden" aria-hidden="true" />
             <span className="hidden @4xl/usage-header:inline">{resetLimitsLayoutLabel}</span>
@@ -416,7 +421,7 @@ export function UsagePage() {
           ref={ref}
           size="compact"
           variant={editingLimits ? "default" : "ghost"}
-          onClick={() => setEditingLimits(!editingLimits)}
+          onClick={toggleEditingLimits}
           aria-label={editingLimits ? gt("Done editing limits") : gt("Edit limits layout")}
           aria-description={hiddenLimitsLabel}
         >
@@ -573,7 +578,7 @@ export function UsagePage() {
   );
 
   return (
-    <AppRouteModal label={gt("Usage")} onEscape={finishEditingLimits}>
+    <AppRouteModal label={gt("Usage")} onEscape={onLimitsEscape}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="@container/usage-header flex min-h-12 shrink-0 items-center gap-1 border-b ps-5 pe-2">
           {topbarContent}
