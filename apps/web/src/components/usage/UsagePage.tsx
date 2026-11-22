@@ -14,13 +14,7 @@ import {
   type UsageProviderKind,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
-import {
-  CircleAlertIcon,
-  ChevronDownIcon,
-  InfoIcon,
-  RotateCcwIcon,
-  SlidersHorizontalIcon,
-} from "lucide-react";
+import { CircleAlertIcon, ChevronDownIcon, InfoIcon, SlidersHorizontalIcon } from "lucide-react";
 import { T, useGT, useLocale, useMessages, Var } from "gt-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
@@ -91,7 +85,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { selectLimitPresentations } from "./UsageLimits";
-import { UsageLimitsPooled } from "./UsageLimitsPooled";
+import { LimitsLayoutMenu, UsageLimitsPooled } from "./UsageLimitsPooled";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
@@ -121,11 +115,7 @@ import {
   useSavedUsageLimitsLayout,
   type UsagePagePreferences,
 } from "./usagePagePreferences";
-import {
-  DEFAULT_USAGE_LIMITS_LAYOUT,
-  limitWindowKey,
-  type UsageLimitsLayoutUpdate,
-} from "./usageLimitsLayout";
+import { DEFAULT_USAGE_LIMITS_LAYOUT, type UsageLimitsLayoutUpdate } from "./usageLimitsLayout";
 
 function isUsageMetric(value: string | null | undefined): value is UsageMetric {
   return METRIC_OPTIONS.some((option) => option.value === value);
@@ -221,10 +211,8 @@ export function UsagePage() {
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
   const limitsLayout = useSavedUsageLimitsLayout() ?? DEFAULT_USAGE_LIMITS_LAYOUT;
-  const [editingLimits, setEditingLimits] = useState(false);
-  const layoutButtonRef = useRef<HTMLButtonElement>(null);
-  const compactLayoutButtonRef = useRef<HTMLButtonElement>(null);
-  const usageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const layoutMenuRef = useRef<HTMLButtonElement>(null);
+  const compactLayoutMenuRef = useRef<HTMLButtonElement>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [limitsNow, setLimitsNow] = useState(() => Date.now());
   const refreshingRef = useRef(false);
@@ -257,10 +245,9 @@ export function UsagePage() {
   const limitPools = limitPresentations
     ? collectLimitPools(collectLimitAccounts(limitPresentations), limitsNow)
     : [];
-  const editableWindows = limitPools.flatMap((pool) =>
-    displayLimitWindows(pool).map((window) => limitWindowKey(pool.driver, window)),
-  );
-  const layoutAvailable = selectedEnvironments.length > 0 && editableWindows.length > 0;
+  const layoutAvailable =
+    selectedEnvironments.length > 0 &&
+    limitPools.some((pool) => displayLimitWindows(pool).length > 0);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -280,7 +267,6 @@ export function UsagePage() {
   };
   const selectMetric = (nextMetric: UsageMetric) => {
     if (nextMetric === "limits") setLimitsNow(Date.now());
-    else setEditingLimits(false);
     updatePreferences({ metric: nextMetric });
   };
   const updateLimitsLayout = useStableCallback((update?: UsageLimitsLayoutUpdate) => {
@@ -292,23 +278,11 @@ export function UsagePage() {
     return saved;
   });
   const resetLimitsLayout = useStableCallback(() => updateLimitsLayout());
-  const finishEditingLimits = () => {
-    if (!editingLimits) return false;
-    setEditingLimits(false);
-    if (!layoutAvailable) {
-      usageHeadingRef.current?.focus();
-      return true;
-    }
-    const button = layoutButtonRef.current?.getClientRects().length
-      ? layoutButtonRef.current
-      : compactLayoutButtonRef.current;
-    button?.focus();
-    return true;
-  };
-  const onLimitsEscape = useStableCallback(finishEditingLimits);
-  const toggleEditingLimits = useStableCallback(() => {
-    if (!finishEditingLimits()) setEditingLimits(true);
-  });
+  // Only one header variant is displayed at a time.
+  const focusLayoutMenu = () =>
+    [layoutMenuRef.current, compactLayoutMenuRef.current]
+      .find((button) => button?.getClientRects().length)
+      ?.focus();
   const refreshLimits = (automatic = false) =>
     // Settled so the timestamp still advances when a refresh throws.
     settlePromise(() =>
@@ -426,43 +400,15 @@ export function UsagePage() {
         });
   const windowOptionLabel = WINDOW_OPTIONS.find((option) => option.days === windowDays)?.label;
   const metricOptionLabel = METRIC_OPTIONS.find((option) => option.value === metric)?.label;
-  const canEditLimits = showingLimits && (editingLimits || layoutAvailable);
-  const hiddenWindows = new Set(limitsLayout.hiddenWindows);
-  const hiddenCount = editableWindows.filter((key) => hiddenWindows.has(key)).length;
-  const hiddenLimitsLabel =
-    !editingLimits && hiddenCount > 0 ? gt("{count} hidden", { count: hiddenCount }) : undefined;
-  const resetLimitsLayoutLabel = gt("Reset layout");
-  const limitsLayoutControls = (ref: typeof layoutButtonRef) =>
-    canEditLimits ? (
-      <>
-        {editingLimits ? (
-          <Button
-            size="compact"
-            variant="ghost"
-            aria-label={resetLimitsLayoutLabel}
-            title={resetLimitsLayoutLabel}
-            onClick={resetLimitsLayout}
-          >
-            <RotateCcwIcon className="@4xl/usage-header:hidden" aria-hidden="true" />
-            <span className="hidden @4xl/usage-header:inline">{resetLimitsLayoutLabel}</span>
-          </Button>
-        ) : null}
-        <Button
-          ref={ref}
-          size="compact"
-          variant={editingLimits ? "default" : "ghost"}
-          onClick={toggleEditingLimits}
-          aria-label={editingLimits ? gt("Done editing limits") : gt("Edit limits layout")}
-          aria-description={hiddenLimitsLabel}
-        >
-          {editingLimits ? <T>Done</T> : <T>Edit</T>}
-          {hiddenLimitsLabel ? (
-            <span className="hidden text-muted-foreground @lg/usage-header:inline">
-              {hiddenLimitsLabel}
-            </span>
-          ) : null}
-        </Button>
-      </>
+  const limitsLayoutMenu = (ref: typeof layoutMenuRef) =>
+    layoutAvailable ? (
+      <LimitsLayoutMenu
+        ref={ref}
+        pools={limitPools}
+        layout={limitsLayout}
+        onLayoutChange={updateLimitsLayout}
+        onReset={resetLimitsLayout}
+      />
     ) : null;
   const refreshButton = (
     <Button
@@ -477,15 +423,10 @@ export function UsagePage() {
     </Button>
   );
   const topbarContent = (
-    <div
-      className={cn(
-        "grid w-full min-w-0 items-center gap-x-3 py-2 @4xl/usage-header:flex",
-        editingLimits ? "grid-cols-1 gap-y-1" : "grid-cols-[minmax(0,1fr)_auto]",
-      )}
-    >
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-2 @4xl/usage-header:flex">
       <WorkspaceBreadcrumb ariaLabel={gt("Usage breadcrumb")} className="min-w-0">
         <WorkspaceBreadcrumbItem>
-          <h1 ref={usageHeadingRef} tabIndex={-1} className="-m-1 rounded-sm p-1">
+          <h1>
             <T>Usage</T>
           </h1>
         </WorkspaceBreadcrumbItem>
@@ -552,7 +493,7 @@ export function UsagePage() {
             </Toggle>
           ))}
         </ToggleGroup>
-        {limitsLayoutControls(layoutButtonRef)}
+        {limitsLayoutMenu(layoutMenuRef)}
         {refreshButton}
       </div>
       <div className="ms-auto flex shrink-0 items-center justify-end gap-1 @4xl/usage-header:hidden">
@@ -601,14 +542,14 @@ export function UsagePage() {
             ))}
           </SelectPopup>
         </Select>
-        {limitsLayoutControls(compactLayoutButtonRef)}
+        {limitsLayoutMenu(compactLayoutMenuRef)}
         {refreshButton}
       </div>
     </div>
   );
 
   return (
-    <AppRouteModal label={gt("Usage")} onEscape={onLimitsEscape}>
+    <AppRouteModal label={gt("Usage")}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="@container/usage-header flex min-h-12 shrink-0 items-center gap-1 border-b ps-5 pe-2">
           {topbarContent}
@@ -634,7 +575,8 @@ export function UsagePage() {
                 pools={limitPools}
                 now={limitsNow}
                 layout={limitsLayout}
-                onLayoutChange={editingLimits ? updateLimitsLayout : undefined}
+                onLayoutChange={updateLimitsLayout}
+                focusLayoutMenu={focusLayoutMenu}
               />
             ) : shown === null ? (
               <UsageSkeleton />
