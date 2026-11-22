@@ -121,7 +121,14 @@ function LayoutExample() {
         pools={collectLimitPools(collectLimitAccounts(presentations), Date.parse(checkedAt))}
         now={Date.parse(checkedAt)}
         layout={layout}
-        onLayoutChange={editing ? setLayout : undefined}
+        onLayoutChange={
+          editing
+            ? (update) => {
+                setLayout(update);
+                return true;
+              }
+            : undefined
+        }
       />
     </>
   );

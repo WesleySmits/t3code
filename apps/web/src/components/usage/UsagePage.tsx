@@ -80,6 +80,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { AppRouteModal, AppRouteModalClose } from "../AppRouteModal";
 import { Skeleton } from "../ui/skeleton";
+import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
@@ -282,13 +283,15 @@ export function UsagePage() {
     else setEditingLimits(false);
     updatePreferences({ metric: nextMetric });
   };
-  const updateLimitsLayout = useStableCallback((update: UsageLimitsLayoutUpdate) => {
-    saveUsagePagePreferences((current) => ({
+  const updateLimitsLayout = useStableCallback((update?: UsageLimitsLayoutUpdate) => {
+    const saved = saveUsagePagePreferences((current) => ({
       ...current,
-      limitsLayout: update(current.limitsLayout ?? DEFAULT_USAGE_LIMITS_LAYOUT),
+      limitsLayout: update?.(current.limitsLayout ?? DEFAULT_USAGE_LIMITS_LAYOUT),
     }));
+    if (!saved) toastManager.add({ type: "error", title: gt("Could not save. Try again.") });
+    return saved;
   });
-  const resetLimitsLayout = useStableCallback(() => updatePreferences({ limitsLayout: undefined }));
+  const resetLimitsLayout = useStableCallback(() => updateLimitsLayout());
   const finishEditingLimits = () => {
     if (!editingLimits) return false;
     setEditingLimits(false);

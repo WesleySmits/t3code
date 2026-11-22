@@ -46,9 +46,12 @@ export function moveLimitItem(
   const key = visibleKeys[index];
   const neighbor = visibleKeys[index + direction];
   if (key === undefined || neighbor === undefined) return order;
-  return [...new Set([...order, ...defaultKeys, ...visibleKeys])].map((id) => {
-    if (id === key) return neighbor;
-    if (id === neighbor) return key;
-    return id;
-  });
+  const moved = [...visibleKeys];
+  moved[index] = neighbor;
+  moved[index + direction] = key;
+  const visible = new Set(visibleKeys);
+  let next = 0;
+  return [...new Set([...order, ...defaultKeys, ...visibleKeys])].map((id) =>
+    visible.has(id) ? (moved[next++] ?? id) : id,
+  );
 }

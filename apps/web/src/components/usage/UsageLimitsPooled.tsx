@@ -879,7 +879,7 @@ export function UsageLimitsPooled({
   readonly pools: readonly LimitPool[];
   readonly now: number;
   readonly layout?: UsageLimitsLayout;
-  readonly onLayoutChange?: ((update: UsageLimitsLayoutUpdate) => void) | undefined;
+  readonly onLayoutChange?: ((update: UsageLimitsLayoutUpdate) => boolean) | undefined;
 }) {
   const gt = useGT();
   const m = useMessages();
@@ -918,10 +918,11 @@ export function UsageLimitsPooled({
           );
     // A keyed item can lose focus when React moves it to a new position.
     flushSync(() => {
-      onLayoutChange((current) => ({
+      const saved = onLayoutChange((current) => ({
         ...current,
         [field]: moveLimitItem(current[field], keys, index, direction, defaultKeys),
       }));
+      if (!saved) return;
       setMoveAnnouncement(
         gt("{label} moved to position {position} of {total}.", {
           label,

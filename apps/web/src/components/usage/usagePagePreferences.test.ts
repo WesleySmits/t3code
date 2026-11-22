@@ -45,6 +45,21 @@ describe("Usage page preferences", () => {
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 30 });
   });
 
+  it("reports rejected writes and keeps the saved layout available", () => {
+    const limitsLayout = { providerOrder: ["codex"], windowOrder: [], hiddenWindows: [] };
+    const preferences = { metric: "limits", windowDays: 30, limitsLayout } as const;
+    saveUsagePagePreferences(preferences);
+    vi.spyOn(storage, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("Storage is full", "QuotaExceededError");
+    });
+    const resetLayout = () =>
+      saveUsagePagePreferences((current) => ({ ...current, limitsLayout: undefined }));
+
+    expect(resetLayout()).toBe(false);
+    expect(readUsagePagePreferences()).toEqual(preferences);
+    expect(resetLayout()).toBe(true);
+  });
+
   // regression: #10189 an invalid saved usage selection was never replaced
   it.each([
     "not-json",

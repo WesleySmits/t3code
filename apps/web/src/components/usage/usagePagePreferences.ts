@@ -25,8 +25,13 @@ export function readUsagePagePreferences(): UsagePagePreferences {
 
 export function saveUsagePagePreferences(
   preferences: UsagePagePreferences | ((current: UsagePagePreferences) => UsagePagePreferences),
-): void {
-  writeLocalStorageValue(STORAGE_KEY, preferences, DEFAULT_PREFERENCES, UsagePagePreferencesSchema);
+): boolean {
+  return writeLocalStorageValue(
+    STORAGE_KEY,
+    preferences,
+    DEFAULT_PREFERENCES,
+    UsagePagePreferencesSchema,
+  );
 }
 
 export function useSavedUsageLimitsLayout() {
