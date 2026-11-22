@@ -29,10 +29,12 @@ import {
 } from "lucide-react";
 import {
   createContext,
+  type MouseEvent,
   type ReactNode,
   type Ref,
   type RefObject,
   use,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -41,7 +43,7 @@ import { flushSync } from "react-dom";
 
 import { ensureLocalApi } from "../../localApi";
 import { usePrimarySettings } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "../settings/providerDriverMeta";
@@ -70,9 +72,11 @@ import {
 } from "@t3tools/shared/usageLimitsCopy";
 import {
   DEFAULT_USAGE_LIMITS_LAYOUT,
+  hideLimitWindow,
   limitWindowKey,
   moveLimitItem,
   orderLimitItems,
+  showLimitWindow,
   type LimitMoveDirection,
   type UsageLimitsLayout,
   type UsageLimitsLayoutUpdate,
@@ -576,17 +580,15 @@ function PoolBar({
   pool,
   color,
   now,
-  className,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
-  readonly className?: string;
 }) {
   const restores = new Map(pool.resets.map((reset) => [reset.member.account.key, reset]));
   const gt = useGT();
   return (
-    <div className={cn("@container/pool min-w-0", className)}>
+    <div className="@container/pool min-w-0">
       <div
         className="grid gap-x-1 gap-y-1"
         style={{ gridTemplateColumns: `repeat(${pool.columns.length}, minmax(0, 1fr))` }}
@@ -687,6 +689,13 @@ const REVEAL_ACTIONS =
   "pointer-events-none opacity-0 transition-opacity duration-100 group-focus-within/actions:pointer-events-auto group-focus-within/actions:opacity-100 group-hover/actions:pointer-events-auto group-hover/actions:opacity-100 motion-reduce:transition-none pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100";
 const LIMIT_FOCUS_TARGETS = '[data-limit-action="hide"], [data-limit-action="more"]';
 
+// Each action reflows the list, so a double-click's second click would act on whatever slid
+// under the pointer. Keyboard activations report a detail of 0 and always act.
+const singleClick =
+  (action: (control: HTMLElement) => void) => (event: MouseEvent<HTMLElement>) => {
+    if (event.detail <= 1) action(event.currentTarget);
+  };
+
 function LimitActions({
   label,
   position,
@@ -727,7 +736,7 @@ function LimitActions({
               aria-label={up}
               title={up}
               aria-disabled={first}
-              onClick={first ? undefined : (event) => onMove(-1, event.currentTarget, label)}
+              onClick={first ? undefined : singleClick((control) => onMove(-1, control, label))}
             >
               <ArrowUpIcon aria-hidden="true" />
             </Button>
@@ -738,7 +747,7 @@ function LimitActions({
               aria-label={down}
               title={down}
               aria-disabled={last}
-              onClick={last ? undefined : (event) => onMove(1, event.currentTarget, label)}
+              onClick={last ? undefined : singleClick((control) => onMove(1, control, label))}
             >
               <ArrowDownIcon aria-hidden="true" />
             </Button>
@@ -752,7 +761,7 @@ function LimitActions({
             data-limit-action="hide"
             aria-label={hide}
             title={hide}
-            onClick={(event) => onHide(event.currentTarget)}
+            onClick={singleClick(onHide)}
           >
             <EyeOffIcon aria-hidden="true" />
           </Button>
@@ -764,7 +773,8 @@ function LimitActions({
             ref={trigger}
             data-limit-action="more"
             aria-label={more}
-            // The 44px touch target grows upward into the gap, so it ends where the card's content starts.
+            // The 44px touch target grows upward into the gap, so it ends where the card's content
+            // starts; the section's wider coarse-pointer gap keeps it clear of the card above.
             className="size-6 pointer-coarse:after:-bottom-1"
             render={<Button variant="ghost-muted" size="icon-xs" />}
           >
@@ -806,7 +816,7 @@ type LayoutSectionEditor = {
   readonly providerPosition: number;
   readonly providerCount: number;
   readonly moveProvider: MoveLimit;
-  readonly moveWindow: (index: number, ...move: Parameters<MoveLimit>) => void;
+  readonly moveWindow: (key: string, ...move: Parameters<MoveLimit>) => void;
   readonly hideWindow: (key: string, label: string, control: HTMLElement) => void;
 };
 
@@ -849,7 +859,7 @@ function PoolSection({
   const label = providerLabel(pool.driver);
   const m = useMessages();
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3 pointer-coarse:gap-8">
       <div className="group/actions flex">
         {/* The actions hang off the name so the row keeps its height and never meets a card's. */}
         <div className="relative">
@@ -896,7 +906,7 @@ function PoolSection({
                   label={name}
                   position={index}
                   count={windows.length}
-                  onMove={(...move) => editor.moveWindow(index, ...move)}
+                  onMove={(...move) => editor.moveWindow(key, ...move)}
                   onHide={(control) => editor.hideWindow(key, name, control)}
                   className={cn(
                     "absolute end-3 top-0 flex -translate-y-1/2 bg-background px-1",
@@ -937,9 +947,15 @@ export function LimitsLayoutMenu({
         : [];
     }),
   );
-  const layoutLabel = gt("Edit limits layout");
+  const layoutLabel = gt("Limits layout");
+  const count = hidden.length;
   const hiddenLabel =
-    hidden.length > 0 ? gt("{count} hidden", { count: hidden.length }) : undefined;
+    count > 0
+      ? gt("{count, plural, one {{count} hidden} other {{count} hidden}}", {
+          count,
+          $context: "usage limits hidden from the page",
+        })
+      : undefined;
   const customized =
     layout.providerOrder.length > 0 ||
     layout.windowOrder.length > 0 ||
@@ -948,14 +964,21 @@ export function LimitsLayoutMenu({
     <Menu>
       <MenuTrigger
         ref={ref}
-        aria-label={hiddenLabel ? `${layoutLabel}, ${hiddenLabel}` : layoutLabel}
+        aria-label={
+          count > 0
+            ? gt(
+                "{count, plural, one {Limits layout, {count} hidden} other {Limits layout, {count} hidden}}",
+                { count },
+              )
+            : layoutLabel
+        }
         title={layoutLabel}
         render={<Button variant="ghost" size={hiddenLabel ? "compact" : "icon-sm"} />}
       >
         <LayoutListIcon aria-hidden="true" />
         {hiddenLabel ? (
           <>
-            <span className="tabular-nums @lg/usage-header:hidden">{hidden.length}</span>
+            <span className="tabular-nums @lg/usage-header:hidden">{count}</span>
             <span className="hidden @lg/usage-header:inline">{hiddenLabel}</span>
           </>
         ) : null}
@@ -965,18 +988,13 @@ export function LimitsLayoutMenu({
           <>
             <MenuGroup>
               <MenuGroupLabel>
-                <T>Hidden</T>
+                {gt("Hidden", { $context: "usage limits hidden from the page" })}
               </MenuGroupLabel>
               {hidden.map(({ key, name }) => (
                 <MenuItem
                   key={key}
                   aria-label={gt("Show {label}", { label: name })}
-                  onClick={() =>
-                    onLayoutChange((current) => ({
-                      ...current,
-                      hiddenWindows: current.hiddenWindows.filter((window) => window !== key),
-                    }))
-                  }
+                  onClick={() => onLayoutChange((current) => showLimitWindow(current, key))}
                 >
                   <EyeIcon aria-hidden="true" />
                   {name}
@@ -993,6 +1011,32 @@ export function LimitsLayoutMenu({
       </MenuPopup>
     </Menu>
   );
+}
+
+function useLimitUndoToasts(hiddenWindowIds: UsageLimitsLayout["hiddenWindowIds"]) {
+  const undoToasts = useRef(
+    new Map<
+      string,
+      { readonly toastId: ReturnType<typeof toastManager.add>; readonly hideId: string }
+    >(),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retires Undo toasts in the global toast manager once their hide is no longer the saved one, whether through Undo, the header menu, a reset or another tab
+  useEffect(() => {
+    for (const [key, undo] of undoToasts.current) {
+      if (hiddenWindowIds?.[key] === undo.hideId) continue;
+      undoToasts.current.delete(key);
+      toastManager.close(undo.toastId);
+    }
+  }, [hiddenWindowIds]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an unmounted view can no longer tell whether its Undo toasts still match the saved layout
+  useEffect(() => {
+    const toasts = undoToasts.current;
+    return () => {
+      for (const undo of toasts.values()) toastManager.close(undo.toastId);
+      toasts.clear();
+    };
+  }, []);
+  return undoToasts;
 }
 
 export function UsageLimitsPooled({
@@ -1026,10 +1070,11 @@ export function UsageLimitsPooled({
     );
     return visible.length > 0 ? [{ pool, windows: visible }] : [];
   });
+  const undoToasts = useLimitUndoToasts(layout.hiddenWindowIds);
   const move = (
     field: "providerOrder" | "windowOrder",
-    keys: readonly string[],
-    index: number,
+    key: string,
+    visibleKeys: (hidden: ReadonlySet<string>) => readonly string[],
     direction: LimitMoveDirection,
     button: HTMLElement,
     label: string,
@@ -1045,23 +1090,24 @@ export function UsageLimitsPooled({
         : allPools.flatMap((pool) =>
             displayLimitWindows(pool).map((window) => limitWindowKey(pool.driver, window)),
           );
+    // Applied to the latest saved layout, which another tab may have changed since this render.
+    const outcome: { moved: { position: number; total: number } | null } = { moved: null };
     // A keyed item can lose focus when React moves it to a new position.
-    flushSync(() => {
-      const saved = onLayoutChange((current) => ({
-        ...current,
-        [field]: moveLimitItem(current[field], keys, index, direction, defaultKeys),
-      }));
-      if (!saved) return;
-      setAnnouncement(
-        gt("{label} moved to position {position} of {total}.", {
-          label,
-          position: index + direction + 1,
-          total: keys.length,
-        }),
-      );
-    });
+    const saved = flushSync(() =>
+      onLayoutChange((current) => {
+        const visible = visibleKeys(new Set(current.hiddenWindows));
+        const order = moveLimitItem(current[field], visible, key, direction, defaultKeys);
+        const position = orderLimitItems(visible, order, (id) => id).indexOf(key) + 1;
+        outcome.moved = order === current[field] ? null : { position, total: visible.length };
+        return outcome.moved ? { ...current, [field]: order } : current;
+      }),
+    );
     button.focus({ preventScroll: true });
     button.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (!saved || !outcome.moved) return;
+    setAnnouncement(
+      gt("{label} moved to position {position} of {total}.", { label, ...outcome.moved }),
+    );
   };
   const focusLimitActions = (card: Element | null | undefined) => {
     const control = [...(card?.querySelectorAll<HTMLElement>(LIMIT_FOCUS_TARGETS) ?? [])].find(
@@ -1072,15 +1118,19 @@ export function UsageLimitsPooled({
     control.scrollIntoView({ block: "nearest", inline: "nearest" });
     return true;
   };
-  const showWindow = (key: string) => {
+  /** Undoes the hide `hideId` if it is still the saved one. Returns whether the layout saved. */
+  const undoHide = (key: string, hideId: string) => {
     if (!onLayoutChange) return false;
+    // Judged against the latest saved layout, which another tab may have changed since this render.
+    const outcome: { shown: boolean } = { shown: false };
     const saved = flushSync(() =>
-      onLayoutChange((current) => ({
-        ...current,
-        hiddenWindows: current.hiddenWindows.filter((window) => window !== key),
-      })),
+      onLayoutChange((current) => {
+        const next = showLimitWindow(current, key, hideId);
+        outcome.shown = next !== current;
+        return next;
+      }),
     );
-    if (!saved) return false;
+    if (!saved || !outcome.shown) return saved;
     // A changed filter can keep the restored card out of view.
     const card = root.current?.querySelector(`[data-limit-card="${CSS.escape(key)}"]`);
     if (!focusLimitActions(card)) focusLayoutMenu?.();
@@ -1091,15 +1141,21 @@ export function UsageLimitsPooled({
     const cards = [...(root.current?.querySelectorAll("[data-limit-card]") ?? [])];
     const index = cards.findIndex((card) => card.contains(control));
     const neighbors = [...cards.slice(index + 1), ...cards.slice(0, Math.max(index, 0)).reverse()];
+    const hideId = randomUUID();
+    const outcome: { hidden: boolean } = { hidden: false };
     const saved = flushSync(() =>
-      onLayoutChange((current) =>
-        current.hiddenWindows.includes(key)
-          ? current
-          : { ...current, hiddenWindows: [...current.hiddenWindows, key] },
-      ),
+      onLayoutChange((current) => {
+        const next = hideLimitWindow(current, key, hideId);
+        outcome.hidden = next !== current;
+        return next;
+      }),
     );
     if (!saved) return;
     if (!neighbors.some((card) => card.isConnected && focusLimitActions(card))) focusLayoutMenu?.();
+    // Another tab hid it first, so its Undo belongs there.
+    if (!outcome.hidden) return;
+    const previous = undoToasts.current.get(key);
+    if (previous) toastManager.close(previous.toastId);
     // The toast region is live, so it also announces the change.
     const toastId = toastManager.add({
       type: "success",
@@ -1107,10 +1163,12 @@ export function UsageLimitsPooled({
       actionProps: {
         children: gt("Undo"),
         onClick: () => {
-          if (showWindow(key)) toastManager.close(toastId);
+          // A failed save keeps the toast for a retry; a later hide leaves nothing to undo.
+          if (undoHide(key, hideId)) toastManager.close(toastId);
         },
       },
     });
+    undoToasts.current.set(key, { toastId, hideId });
   };
   const notices = collectLimitNotices(presentations, m);
   const externalLinks = collectExternalUsageLinks(presentations, m);
@@ -1144,15 +1202,25 @@ export function UsageLimitsPooled({
                     moveProvider: (...moveAction) =>
                       move(
                         "providerOrder",
-                        sections.map(({ pool }) => pool.driver),
-                        index,
+                        pool.driver,
+                        (hidden) =>
+                          pools
+                            .filter((each) =>
+                              displayLimitWindows(each).some(
+                                (window) => !hidden.has(limitWindowKey(each.driver, window)),
+                              ),
+                            )
+                            .map((each) => each.driver),
                         ...moveAction,
                       ),
-                    moveWindow: (windowIndex, ...moveAction) =>
+                    moveWindow: (key, ...moveAction) =>
                       move(
                         "windowOrder",
-                        windows.map((window) => limitWindowKey(pool.driver, window)),
-                        windowIndex,
+                        key,
+                        (hidden) =>
+                          displayLimitWindows(pool)
+                            .map((window) => limitWindowKey(pool.driver, window))
+                            .filter((windowKey) => !hidden.has(windowKey)),
                         ...moveAction,
                       ),
                     hideWindow,
