@@ -96,6 +96,9 @@ function LayoutExample() {
             quotaProvider("codex", [
               { id: "weekly", kind: "weekly", label: "Weekly", usedPercent: 76 },
             ]),
+            quotaProvider("cursor", [
+              { id: "totalPercentUsed", kind: "monthly", label: "Overall", usedPercent: 25 },
+            ]),
             quotaProvider("antigravity", [
               { id: "gemini-5h", kind: "session", label: "Gemini 5-hour", usedPercent: 3 },
               { id: "gemini-weekly", kind: "weekly", label: "Gemini Weekly", usedPercent: 50 },
@@ -140,6 +143,10 @@ it("reorders pools and windows with the keyboard and restores individual hidden 
   await expect
     .element(screen.getByRole("heading", { name: "Antigravity", exact: true }))
     .toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Move Cursor up", exact: true }))
+    .toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Hide Cursor" })).toBeVisible();
 
   const moveProvider = screen.getByRole("button", { name: "Move Antigravity up" });
   moveProvider.element().focus();
@@ -147,10 +154,10 @@ it("reorders pools and windows with the keyboard and restores individual hidden 
   await expect.element(moveProvider).toHaveFocus();
   await expect
     .element(screen.getByRole("status"))
-    .toHaveTextContent("Antigravity moved to position 1 of 2.");
+    .toHaveTextContent("Antigravity moved to position 2 of 3.");
   expect(
     [...screen.container.querySelectorAll("h2")].map((heading) => heading.textContent),
-  ).toEqual(["Antigravity", "Codex"]);
+  ).toEqual(["Codex", "Antigravity", "Cursor"]);
 
   const moveWindow = screen.getByRole("button", { name: "Move Antigravity · Gemini Weekly up" });
   await moveWindow.click();

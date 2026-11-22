@@ -485,7 +485,7 @@ export function UsagePage() {
     >
       <WorkspaceBreadcrumb ariaLabel={gt("Usage breadcrumb")} className="min-w-0">
         <WorkspaceBreadcrumbItem>
-          <h1 ref={usageHeadingRef} tabIndex={-1}>
+          <h1 ref={usageHeadingRef} tabIndex={-1} className="-m-1 rounded-sm p-1">
             <T>Usage</T>
           </h1>
         </WorkspaceBreadcrumbItem>

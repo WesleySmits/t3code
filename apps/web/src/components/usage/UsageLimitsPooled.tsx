@@ -725,6 +725,7 @@ function MoveButtons({
   readonly onMove: MoveLimit;
 }) {
   const gt = useGT();
+  if (count < 2) return null;
   const up = gt("Move {label} up", { label });
   const down = gt("Move {label} down", { label });
   return (
