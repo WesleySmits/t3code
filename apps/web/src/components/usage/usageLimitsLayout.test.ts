@@ -15,4 +15,14 @@ describe("usage limits ordering", () => {
       ),
     ).toEqual(["claude", "cursor", "codex", "grok", "antigravity"]);
   });
+
+  it("keeps the default slots of filtered providers on the first move", () => {
+    const defaults = ["codex", "cursor", "claude", "antigravity"];
+    expect(moveLimitItem([], ["codex", "claude"], 1, -1, defaults)).toEqual([
+      "claude",
+      "cursor",
+      "codex",
+      "antigravity",
+    ]);
+  });
 });

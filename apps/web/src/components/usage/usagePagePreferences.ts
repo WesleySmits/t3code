@@ -1,7 +1,11 @@
 import { UsageProviderKind } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { getLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
+import {
+  readLocalStorageValue,
+  useLocalStorage,
+  writeLocalStorageValue,
+} from "../../hooks/useLocalStorage";
 import { UsageLimitsLayoutSchema } from "./usageLimitsLayout";
 
 const STORAGE_KEY = "t3code:usage-page-preferences:v1";
@@ -16,18 +20,20 @@ export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 const DEFAULT_PREFERENCES: UsagePagePreferences = { metric: "limits", windowDays: 30 };
 
 export function readUsagePagePreferences(): UsagePagePreferences {
-  try {
-    return getLocalStorageItem(STORAGE_KEY, UsagePagePreferencesSchema) ?? DEFAULT_PREFERENCES;
-  } catch (error) {
-    console.error("Could not read Usage page preferences.", error);
-    return DEFAULT_PREFERENCES;
-  }
+  return readLocalStorageValue(STORAGE_KEY, DEFAULT_PREFERENCES, UsagePagePreferencesSchema);
 }
 
-export function saveUsagePagePreferences(preferences: UsagePagePreferences): void {
-  try {
-    setLocalStorageItem(STORAGE_KEY, preferences, UsagePagePreferencesSchema);
-  } catch (error) {
-    console.error("Could not save Usage page preferences.", error);
-  }
+export function saveUsagePagePreferences(
+  preferences: UsagePagePreferences | ((current: UsagePagePreferences) => UsagePagePreferences),
+): void {
+  writeLocalStorageValue(STORAGE_KEY, preferences, DEFAULT_PREFERENCES, UsagePagePreferencesSchema);
+}
+
+export function useSavedUsageLimitsLayout() {
+  const [preferences] = useLocalStorage(
+    STORAGE_KEY,
+    DEFAULT_PREFERENCES,
+    UsagePagePreferencesSchema,
+  );
+  return preferences.limitsLayout;
 }

@@ -12189,6 +12189,7 @@
   "90505e3bfadccee0": "Move {label} up",
   "33234f46946de376": "Move {label} down",
   "68e588f6255f796f": "Hide {label}",
+  "bbd35f7979a24a2e": "{label} moved to position {position} of {total}.",
   "a16b48709357a5a7": "Manage usage",
   "baa7f4c5029d2c34": "Hidden",
   "a00e74aaa421c524": "left",

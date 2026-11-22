@@ -7,6 +7,7 @@ import {
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
+  type LimitPresentations,
   paceRemainingPercent,
   remainingPercent,
   type ResetCreditChoice,
@@ -60,6 +61,7 @@ import {
   orderLimitItems,
   type LimitMoveDirection,
   type UsageLimitsLayout,
+  type UsageLimitsLayoutUpdate,
 } from "./usageLimitsLayout";
 
 function accountInitials(email: string): string {
@@ -267,24 +269,22 @@ function ActiveSegmentPopover({
   handle,
   actions,
   payload,
-  pools,
+  windows,
   now,
 }: {
   readonly handle: ReturnType<typeof PopoverCreateHandle<SegmentPayload>>;
   readonly actions: RefObject<PopoverPrimitive.Root.Actions | null>;
   readonly payload: SegmentPayload;
-  readonly pools: readonly LimitPool[];
+  readonly windows: readonly LimitPoolWindow[];
   readonly now: number;
 }) {
-  const available = pools.some((pool) =>
-    displayLimitWindows(pool).some((window) =>
-      window.members.some(
-        (member) =>
-          member.account.key === payload.account.key &&
-          member.window.id === payload.window.id &&
-          member.window.kind === payload.window.kind &&
-          Boolean(member.account.redeem) === Boolean(payload.redeem),
-      ),
+  const available = windows.some((window) =>
+    window.members.some(
+      (member) =>
+        member.account.key === payload.account.key &&
+        member.window.id === payload.window.id &&
+        member.window.kind === payload.window.kind &&
+        Boolean(member.account.redeem) === Boolean(payload.redeem),
     ),
   );
   // The trigger is gone, so the popup has nothing to anchor to: an exit transition would
@@ -683,7 +683,7 @@ function PoolWindowCard({
         pool={pool}
         label={label}
         hidden={hidden}
-        className={cn(controls && "min-w-0", dimmed)}
+        className={cn(controls && "min-w-0 max-[360px]:col-span-full", dimmed)}
       />
       <PoolBar
         pool={pool}
@@ -692,7 +692,7 @@ function PoolWindowCard({
         className={cn(controls && "max-md:col-span-2", dimmed)}
       />
       {controls ? (
-        <div className="col-start-2 row-start-1 flex items-center gap-1 md:col-start-3">
+        <div className="col-start-2 row-start-1 flex items-center gap-1 max-[360px]:col-span-full max-[360px]:col-start-1 max-[360px]:row-start-2 max-[360px]:justify-end md:col-start-3">
           {controls}
         </div>
       ) : null}
@@ -701,6 +701,7 @@ function PoolWindowCard({
           className={cn(
             "text-xs text-muted-foreground",
             controls ? "col-span-full" : "md:col-span-2",
+            dimmed,
           )}
         >
           {description}
@@ -710,7 +711,7 @@ function PoolWindowCard({
   );
 }
 
-type MoveLimit = (direction: LimitMoveDirection, button: HTMLButtonElement) => void;
+type MoveLimit = (direction: LimitMoveDirection, button: HTMLButtonElement, label: string) => void;
 
 function MoveButtons({
   label,
@@ -734,7 +735,7 @@ function MoveButtons({
         aria-label={up}
         title={up}
         aria-disabled={position === 0}
-        onClick={position > 0 ? (event) => onMove(-1, event.currentTarget) : undefined}
+        onClick={position > 0 ? (event) => onMove(-1, event.currentTarget, label) : undefined}
       >
         <ArrowUpIcon aria-hidden="true" />
       </Button>
@@ -744,7 +745,9 @@ function MoveButtons({
         aria-label={down}
         title={down}
         aria-disabled={position === count - 1}
-        onClick={position < count - 1 ? (event) => onMove(1, event.currentTarget) : undefined}
+        onClick={
+          position < count - 1 ? (event) => onMove(1, event.currentTarget, label) : undefined
+        }
       >
         <ArrowDownIcon aria-hidden="true" />
       </Button>
@@ -777,15 +780,17 @@ function PoolSection({
   const m = useMessages();
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ProviderInstanceIcon
-          driverKind={pool.driver}
-          displayName={label}
-          indicatorBackground="var(--background)"
-          className="size-5"
-          iconClassName="size-4 text-foreground/80"
-        />
-        {label}
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <ProviderInstanceIcon
+            driverKind={pool.driver}
+            displayName={label}
+            indicatorBackground="var(--background)"
+            className="size-5"
+            iconClassName="size-4 text-foreground/80"
+          />
+          {label}
+        </h2>
         {editor ? (
           <span className="ms-auto flex items-center gap-1">
             <MoveButtons
@@ -796,12 +801,13 @@ function PoolSection({
             />
           </span>
         ) : null}
-      </h2>
+      </div>
       {windows.map((window, index) => {
         const details =
           pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool, m) : undefined;
         const key = limitWindowKey(pool.driver, window);
-        const name = details?.label ?? window.label;
+        const windowLabel = details ? details.label : window.label;
+        const name = windowLabel === null ? label : `${label} · ${windowLabel}`;
         const hidden = editor?.hiddenWindows.has(key) ?? false;
         return (
           <PoolWindowCard
@@ -819,7 +825,7 @@ function PoolSection({
                     label={name}
                     position={index}
                     count={windows.length}
-                    onMove={(direction, button) => editor.moveWindow(index, direction, button)}
+                    onMove={(...move) => editor.moveWindow(index, ...move)}
                   />
                   <ToggleLimitVisibility
                     label={name}
@@ -862,20 +868,24 @@ function ToggleLimitVisibility({
 
 export function UsageLimitsPooled({
   presentations,
+  allPresentations = presentations,
+  pools,
   now,
   layout = DEFAULT_USAGE_LIMITS_LAYOUT,
   onLayoutChange,
 }: {
-  readonly presentations: Parameters<typeof collectLimitAccounts>[0];
+  readonly presentations: LimitPresentations;
+  readonly allPresentations?: LimitPresentations;
+  readonly pools: readonly LimitPool[];
   readonly now: number;
   readonly layout?: UsageLimitsLayout;
-  readonly onLayoutChange?: ((layout: UsageLimitsLayout) => void) | undefined;
+  readonly onLayoutChange?: ((update: UsageLimitsLayoutUpdate) => void) | undefined;
 }) {
   const gt = useGT();
   const m = useMessages();
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
   const hiddenWindows = new Set(layout.hiddenWindows);
   const sections = orderLimitItems(pools, layout.providerOrder, (pool) => pool.driver).flatMap(
     (pool) => {
@@ -893,12 +903,33 @@ export function UsageLimitsPooled({
     index: number,
     direction: LimitMoveDirection,
     button: HTMLButtonElement,
+    label: string,
   ) => {
     if (!onLayoutChange) return;
-    const order = moveLimitItem(layout[field], keys, index, direction);
-    if (order === layout[field]) return;
+    const allPools =
+      allPresentations === presentations
+        ? pools
+        : collectLimitPools(collectLimitAccounts(allPresentations), now);
+    const defaultKeys =
+      field === "providerOrder"
+        ? allPools.map((pool) => pool.driver)
+        : allPools.flatMap((pool) =>
+            displayLimitWindows(pool).map((window) => limitWindowKey(pool.driver, window)),
+          );
     // A keyed item can lose focus when React moves it to a new position.
-    flushSync(() => onLayoutChange({ ...layout, [field]: order }));
+    flushSync(() => {
+      onLayoutChange((current) => ({
+        ...current,
+        [field]: moveLimitItem(current[field], keys, index, direction, defaultKeys),
+      }));
+      setMoveAnnouncement(
+        gt("{label} moved to position {position} of {total}.", {
+          label,
+          position: index + direction + 1,
+          total: keys.length,
+        }),
+      );
+    });
     button.focus({ preventScroll: true });
     button.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
@@ -906,6 +937,9 @@ export function UsageLimitsPooled({
   const externalLinks = collectExternalUsageLinks(presentations, m);
   return (
     <div className="flex flex-col gap-8">
+      <span role="status" className="sr-only">
+        {moveAnnouncement}
+      </span>
       {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           <T>No provider on the selected environments reports subscription limits.</T>
@@ -929,29 +963,27 @@ export function UsageLimitsPooled({
                     providerPosition: index,
                     providerCount: sections.length,
                     hiddenWindows,
-                    moveProvider: (direction, button) =>
+                    moveProvider: (...moveAction) =>
                       move(
                         "providerOrder",
                         sections.map(({ pool }) => pool.driver),
                         index,
-                        direction,
-                        button,
+                        ...moveAction,
                       ),
-                    moveWindow: (windowIndex, direction, button) =>
+                    moveWindow: (windowIndex, ...moveAction) =>
                       move(
                         "windowOrder",
                         windows.map((window) => limitWindowKey(pool.driver, window)),
                         windowIndex,
-                        direction,
-                        button,
+                        ...moveAction,
                       ),
                     toggleWindow: (key) =>
-                      onLayoutChange({
-                        ...layout,
-                        hiddenWindows: hiddenWindows.has(key)
-                          ? layout.hiddenWindows.filter((window) => window !== key)
-                          : [...layout.hiddenWindows, key],
-                      }),
+                      onLayoutChange((current) => ({
+                        ...current,
+                        hiddenWindows: current.hiddenWindows.includes(key)
+                          ? current.hiddenWindows.filter((window) => window !== key)
+                          : [...current.hiddenWindows, key],
+                      })),
                   }
                 : undefined
             }
@@ -965,7 +997,7 @@ export function UsageLimitsPooled({
               handle={segmentPopover}
               actions={segmentPopoverActions}
               payload={payload}
-              pools={pools}
+              windows={sections.flatMap(({ windows }) => windows)}
               now={now}
             />
           ) : null

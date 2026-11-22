@@ -1,5 +1,10 @@
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
-import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
+import {
+  collectLimitAccounts,
+  collectLimitPools,
+  displayLimitWindows,
+  usesChatGptSharing,
+} from "@t3tools/shared/usageLimits";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
@@ -84,7 +89,8 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
-import { UsageLimitsSection } from "./UsageLimits";
+import { selectLimitPresentations } from "./UsageLimits";
+import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
@@ -111,9 +117,14 @@ import {
 import {
   readUsagePagePreferences,
   saveUsagePagePreferences,
+  useSavedUsageLimitsLayout,
   type UsagePagePreferences,
 } from "./usagePagePreferences";
-import { DEFAULT_USAGE_LIMITS_LAYOUT, type UsageLimitsLayout } from "./usageLimitsLayout";
+import {
+  DEFAULT_USAGE_LIMITS_LAYOUT,
+  limitWindowKey,
+  type UsageLimitsLayoutUpdate,
+} from "./usageLimitsLayout";
 
 function isUsageMetric(value: string | null | undefined): value is UsageMetric {
   return METRIC_OPTIONS.some((option) => option.value === value);
@@ -121,6 +132,10 @@ function isUsageMetric(value: string | null | undefined): value is UsageMetric {
 
 function isUsageWindowDays(value: number): value is UsagePagePreferences["windowDays"] {
   return WINDOW_OPTIONS.some((option) => option.days === value);
+}
+
+function selectUsageWindow(days: UsagePagePreferences["windowDays"]) {
+  return { days, window: makeWindow(days, undefined, days === 1 ? "hour" : "day") };
 }
 
 const providerLabel = (provider: UsageProviderKind) => PROVIDER_PRESENTATION[provider].label;
@@ -199,20 +214,16 @@ export function UsagePage() {
       ? gt("{label} ({shortcut})", { label: m(option.label), shortcut })
       : m(option.label);
   };
-  const [windowSelection, setWindowSelection] = useState(() => ({
-    days: preferences.windowDays,
-    window: makeWindow(
-      preferences.windowDays,
-      undefined,
-      preferences.windowDays === 1 ? "hour" : "day",
-    ),
-  }));
+  const [windowSelection, setWindowSelection] = useState(() =>
+    selectUsageWindow(preferences.windowDays),
+  );
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
-  const limitsLayout = preferences.limitsLayout ?? DEFAULT_USAGE_LIMITS_LAYOUT;
+  const limitsLayout = useSavedUsageLimitsLayout() ?? DEFAULT_USAGE_LIMITS_LAYOUT;
   const [editingLimits, setEditingLimits] = useState(false);
   const layoutButtonRef = useRef<HTMLButtonElement>(null);
   const compactLayoutButtonRef = useRef<HTMLButtonElement>(null);
+  const usageHeadingRef = useRef<HTMLHeadingElement>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [limitsNow, setLimitsNow] = useState(() => Date.now());
   const refreshingRef = useRef(false);
@@ -239,6 +250,16 @@ export function UsagePage() {
   const presentationsWithProviders = useAtomValue(
     environmentPresentations.presentationsWithProvidersAtom,
   );
+  const limitPresentations = showingLimits
+    ? selectLimitPresentations(presentationsWithProviders, selectedEnvironmentIds, hiddenProviders)
+    : null;
+  const limitPools = limitPresentations
+    ? collectLimitPools(collectLimitAccounts(limitPresentations), limitsNow)
+    : [];
+  const editableWindows = limitPools.flatMap((pool) =>
+    displayLimitWindows(pool).map((window) => limitWindowKey(pool.driver, window)),
+  );
+  const layoutAvailable = selectedEnvironments.length > 0 && editableWindows.length > 0;
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -248,31 +269,33 @@ export function UsagePage() {
   );
 
   const updatePreferences = (patch: Partial<UsagePagePreferences>) => {
-    const nextPreferences = { ...preferences, ...patch };
-    setPreferences(nextPreferences);
-    saveUsagePagePreferences(nextPreferences);
+    setPreferences((current) => ({ ...current, ...patch }));
+    saveUsagePagePreferences((current) => ({ ...current, ...patch }));
   };
   const selectWindow = (days: number) => {
     if (!isUsageWindowDays(days)) return;
     updatePreferences({ windowDays: days });
-    setWindowSelection({
-      days,
-      window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
-    });
+    setWindowSelection(selectUsageWindow(days));
   };
   const selectMetric = (nextMetric: UsageMetric) => {
     if (nextMetric === "limits") setLimitsNow(Date.now());
     else setEditingLimits(false);
     updatePreferences({ metric: nextMetric });
   };
-  const updateLimitsLayout = useStableCallback((limitsLayout: UsageLimitsLayout) =>
-    updatePreferences({ limitsLayout }),
-  );
+  const updateLimitsLayout = useStableCallback((update: UsageLimitsLayoutUpdate) => {
+    saveUsagePagePreferences((current) => ({
+      ...current,
+      limitsLayout: update(current.limitsLayout ?? DEFAULT_USAGE_LIMITS_LAYOUT),
+    }));
+  });
   const resetLimitsLayout = useStableCallback(() => updatePreferences({ limitsLayout: undefined }));
-  const toggleEditingLimits = useStableCallback(() => setEditingLimits((editing) => !editing));
   const finishEditingLimits = () => {
     if (!editingLimits) return false;
     setEditingLimits(false);
+    if (!layoutAvailable) {
+      usageHeadingRef.current?.focus();
+      return true;
+    }
     const button = layoutButtonRef.current?.getClientRects().length
       ? layoutButtonRef.current
       : compactLayoutButtonRef.current;
@@ -280,6 +303,9 @@ export function UsagePage() {
     return true;
   };
   const onLimitsEscape = useStableCallback(finishEditingLimits);
+  const toggleEditingLimits = useStableCallback(() => {
+    if (!finishEditingLimits()) setEditingLimits(true);
+  });
   const refreshLimits = (automatic = false) =>
     // Settled so the timestamp still advances when a refresh throws.
     settlePromise(() =>
@@ -397,8 +423,9 @@ export function UsagePage() {
         });
   const windowOptionLabel = WINDOW_OPTIONS.find((option) => option.days === windowDays)?.label;
   const metricOptionLabel = METRIC_OPTIONS.find((option) => option.value === metric)?.label;
-  const canEditLimits = showingLimits && (editingLimits || selectedEnvironments.length > 0);
-  const hiddenCount = limitsLayout.hiddenWindows.length;
+  const canEditLimits = showingLimits && (editingLimits || layoutAvailable);
+  const hiddenWindows = new Set(limitsLayout.hiddenWindows);
+  const hiddenCount = editableWindows.filter((key) => hiddenWindows.has(key)).length;
   const hiddenLimitsLabel =
     !editingLimits && hiddenCount > 0 ? gt("{count} hidden", { count: hiddenCount }) : undefined;
   const resetLimitsLayoutLabel = gt("Reset layout");
@@ -427,7 +454,7 @@ export function UsagePage() {
         >
           {editingLimits ? <T>Done</T> : <T>Edit</T>}
           {hiddenLimitsLabel ? (
-            <span className="hidden text-muted-foreground @sm/usage-header:inline">
+            <span className="hidden text-muted-foreground @lg/usage-header:inline">
               {hiddenLimitsLabel}
             </span>
           ) : null}
@@ -455,7 +482,7 @@ export function UsagePage() {
     >
       <WorkspaceBreadcrumb ariaLabel={gt("Usage breadcrumb")} className="min-w-0">
         <WorkspaceBreadcrumbItem>
-          <h1>
+          <h1 ref={usageHeadingRef} tabIndex={-1}>
             <T>Usage</T>
           </h1>
         </WorkspaceBreadcrumbItem>
@@ -597,10 +624,11 @@ export function UsagePage() {
                     ? gt("Select an environment to see limits.")
                     : gt("Select an environment to see usage.")}
               </p>
-            ) : showingLimits ? (
-              <UsageLimitsSection
-                selectedEnvironmentIds={selectedEnvironmentIds}
-                hiddenProviders={hiddenProviders}
+            ) : limitPresentations ? (
+              <UsageLimitsPooled
+                presentations={limitPresentations}
+                allPresentations={presentationsWithProviders}
+                pools={limitPools}
                 now={limitsNow}
                 layout={limitsLayout}
                 onLayoutChange={editingLimits ? updateLimitsLayout : undefined}

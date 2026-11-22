@@ -4,7 +4,11 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { CHATGPT_USAGE_URL } from "@t3tools/shared/usageLimits";
+import {
+  CHATGPT_USAGE_URL,
+  collectLimitAccounts,
+  collectLimitPools,
+} from "@t3tools/shared/usageLimits";
 import { useState } from "react";
 import { describe, expect, it } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
@@ -55,7 +59,7 @@ describe("UsageLimitsPooled ChatGPT usage card", () => {
       ],
     ]);
     await using screen = await render(
-      <UsageLimitsPooled presentations={presentations} now={Date.parse(checkedAt)} />,
+      <UsageLimitsPooled presentations={presentations} pools={[]} now={Date.parse(checkedAt)} />,
     );
 
     await expect
@@ -114,6 +118,7 @@ function LayoutExample() {
       </button>
       <UsageLimitsPooled
         presentations={presentations}
+        pools={collectLimitPools(collectLimitAccounts(presentations), Date.parse(checkedAt))}
         now={Date.parse(checkedAt)}
         layout={layout}
         onLayoutChange={editing ? setLayout : undefined}
@@ -125,23 +130,28 @@ function LayoutExample() {
 it("reorders pools and windows with the keyboard and restores individual hidden windows", async () => {
   await using screen = await render(<LayoutExample />);
   await screen.getByRole("button", { name: "Edit layout" }).click();
+  await expect
+    .element(screen.getByRole("heading", { name: "Antigravity", exact: true }))
+    .toBeVisible();
 
   const moveProvider = screen.getByRole("button", { name: "Move Antigravity up" });
   moveProvider.element().focus();
   await userEvent.keyboard("{Enter}");
   await expect.element(moveProvider).toHaveFocus();
+  await expect
+    .element(screen.getByRole("status"))
+    .toHaveTextContent("Antigravity moved to position 1 of 2.");
   expect(
     [...screen.container.querySelectorAll("h2")].map((heading) => heading.textContent),
   ).toEqual(["Antigravity", "Codex"]);
 
-  const moveWindow = screen.getByRole("button", { name: "Move Gemini Weekly up" });
+  const moveWindow = screen.getByRole("button", { name: "Move Antigravity · Gemini Weekly up" });
   await moveWindow.click();
   await expect.element(moveWindow).toHaveFocus();
 
-  await screen.getByRole("button", { name: "Hide Gemini 4 Argon Weekly" }).click();
-  await expect
-    .element(screen.getByRole("button", { name: "Show Gemini 4 Argon Weekly" }))
-    .toHaveFocus();
+  const argon = "Antigravity · Gemini 4 Argon Weekly";
+  await screen.getByRole("button", { name: `Hide ${argon}` }).click();
+  await expect.element(screen.getByRole("button", { name: `Show ${argon}` })).toHaveFocus();
   await screen.getByRole("button", { name: "Finish editing" }).click();
   await expect
     .element(screen.getByText("Gemini 4 Argon Weekly", { exact: true }))
@@ -152,7 +162,7 @@ it("reorders pools and windows with the keyboard and restores individual hidden 
   expect(weekly.compareDocumentPosition(session) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
   await screen.getByRole("button", { name: "Edit layout" }).click();
-  await screen.getByRole("button", { name: "Show Gemini 4 Argon Weekly" }).click();
+  await screen.getByRole("button", { name: `Show ${argon}` }).click();
   await screen.getByRole("button", { name: "Finish editing" }).click();
   await expect.element(screen.getByText("Gemini 4 Argon Weekly", { exact: true })).toBeVisible();
 });

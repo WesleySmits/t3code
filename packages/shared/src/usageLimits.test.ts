@@ -1365,6 +1365,21 @@ describe("pooled account columns", () => {
     expect(pool!.windows[1]!.resets.map((reset) => reset.restoresPercent)).toEqual([40, 20]);
   });
 
+  it("keeps a Codex monthly allowance distinct from the individual credit window", () => {
+    const monthly = { ...weekly, id: "primary", kind: "monthly", label: "Monthly" } as const;
+    const individual = { ...monthly, id: "individual", label: "Monthly credit limit" };
+    const driver = ProviderDriverKind.make("codex");
+    const monthAccount = { ...account("month", [monthly]), driver };
+    const creditAccount = { ...account("credit", [individual]), driver };
+    const [both] = collectLimitPools([monthAccount, creditAccount], now);
+    const [creditOnly] = collectLimitPools([creditAccount], now);
+    expect(both?.windows.map((row) => [row.id, row.members.length])).toEqual([
+      ["monthly", 1],
+      ["monthly:individual", 1],
+    ]);
+    expect(creditOnly?.windows.map((row) => row.id)).toEqual(["monthly:individual"]);
+  });
+
   it("falls back to weekly resets when no account reports a session", () => {
     const [pool] = collectLimitPools(
       [

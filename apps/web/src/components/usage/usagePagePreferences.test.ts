@@ -14,7 +14,7 @@ beforeEach(() => {
       values.set(key, value);
     },
   };
-  vi.stubGlobal("window", { localStorage: storage });
+  vi.stubGlobal("window", { localStorage: storage, dispatchEvent: () => true });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -34,8 +34,12 @@ describe("Usage page preferences", () => {
     saveUsagePagePreferences({ ...preferences, limitsLayout });
     expect(readUsagePagePreferences()).toEqual({ ...preferences, limitsLayout });
 
-    saveUsagePagePreferences({ ...readUsagePagePreferences(), limitsLayout: undefined });
-    expect(readUsagePagePreferences()).toEqual(preferences);
+    // Changing the metric in another client reads the layout saved by the first.
+    saveUsagePagePreferences((current) => ({ ...current, metric: "tokens" }));
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, metric: "tokens", limitsLayout });
+
+    saveUsagePagePreferences((current) => ({ ...current, limitsLayout: undefined }));
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, metric: "tokens" });
 
     values.set(key, '{"metric":"tokens","windowDays":30}');
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 30 });

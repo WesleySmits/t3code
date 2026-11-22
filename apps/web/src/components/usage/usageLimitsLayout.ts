@@ -8,6 +8,7 @@ export const UsageLimitsLayoutSchema = Schema.Struct({
 });
 
 export type UsageLimitsLayout = typeof UsageLimitsLayoutSchema.Type;
+export type UsageLimitsLayoutUpdate = (current: UsageLimitsLayout) => UsageLimitsLayout;
 export type LimitMoveDirection = -1 | 1;
 
 export const DEFAULT_USAGE_LIMITS_LAYOUT: UsageLimitsLayout = {
@@ -40,11 +41,12 @@ export function moveLimitItem(
   visibleKeys: readonly string[],
   index: number,
   direction: LimitMoveDirection,
+  defaultKeys: readonly string[] = visibleKeys,
 ): readonly string[] {
   const key = visibleKeys[index];
   const neighbor = visibleKeys[index + direction];
   if (key === undefined || neighbor === undefined) return order;
-  return [...new Set([...order, ...visibleKeys])].map((id) => {
+  return [...new Set([...order, ...defaultKeys, ...visibleKeys])].map((id) => {
     if (id === key) return neighbor;
     if (id === neighbor) return key;
     return id;
