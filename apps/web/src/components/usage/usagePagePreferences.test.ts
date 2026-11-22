@@ -14,7 +14,7 @@ beforeEach(() => {
       values.set(key, value);
     },
   };
-  vi.stubGlobal("window", { localStorage: storage });
+  vi.stubGlobal("window", { localStorage: storage, dispatchEvent: () => true });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -24,12 +24,40 @@ afterEach(() => {
 });
 
 describe("Usage page preferences", () => {
-  it("round-trips hidden providers and reads older saves without them", () => {
-    saveUsagePagePreferences({ metric: "cost", windowDays: 7, hiddenProviders: ["codex"] });
-    expect(readUsagePagePreferences().hiddenProviders).toEqual(["codex"]);
+  it("round-trips usage preferences and reads older saves without a limits layout", () => {
+    const limitsLayout = {
+      providerOrder: ["claudeAgent", "antigravity"],
+      windowOrder: ['["antigravity","weekly","gemini-weekly"]'],
+      hiddenWindows: ['["antigravity","weekly","gemini-argon-wtu-weekly"]'],
+    };
+    const preferences = { metric: "cost", windowDays: 7, hiddenProviders: ["codex"] } as const;
+    saveUsagePagePreferences({ ...preferences, limitsLayout });
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, limitsLayout });
+
+    // Changing the metric in another client reads the layout saved by the first.
+    saveUsagePagePreferences((current) => ({ ...current, metric: "tokens" }));
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, metric: "tokens", limitsLayout });
+
+    saveUsagePagePreferences((current) => ({ ...current, limitsLayout: undefined }));
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, metric: "tokens" });
 
     values.set(key, '{"metric":"tokens","windowDays":30}');
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 30 });
+  });
+
+  it("reports rejected writes and keeps the saved layout available", () => {
+    const limitsLayout = { providerOrder: ["codex"], windowOrder: [], hiddenWindows: [] };
+    const preferences = { metric: "limits", windowDays: 30, limitsLayout } as const;
+    saveUsagePagePreferences(preferences);
+    vi.spyOn(storage, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("Storage is full", "QuotaExceededError");
+    });
+    const resetLayout = () =>
+      saveUsagePagePreferences((current) => ({ ...current, limitsLayout: undefined }));
+
+    expect(resetLayout()).toBe(false);
+    expect(readUsagePagePreferences()).toEqual(preferences);
+    expect(resetLayout()).toBe(true);
   });
 
   // regression: #10189 an invalid saved usage selection was never replaced

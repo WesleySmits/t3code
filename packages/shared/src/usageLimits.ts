@@ -617,9 +617,11 @@ function planCapacity(account: LimitAccount, kind: ServerProviderUsageWindow["ki
   return undefined;
 }
 
-// Codex ids name slots, so pool by kind; other drivers' ids identify distinct allowances.
+// Codex's time limits use slot ids. Its individual credit has a distinct allowance.
 function poolKey(driver: ServerProvider["driver"], window: ServerProviderUsageWindow): string {
-  return driver === "codex" ? window.kind : `${window.kind}:${window.id}`;
+  return driver === "codex" && window.id !== "individual"
+    ? window.kind
+    : `${window.kind}:${window.id}`;
 }
 
 function poolMember(account: LimitAccount, reported: ServerProviderUsageWindow, now: number) {
