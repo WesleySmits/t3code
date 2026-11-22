@@ -12,12 +12,24 @@ import { Button } from "./ui/button";
 import { DialogBackdrop } from "./ui/dialog";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
+function escapeOutsidePopup(target: EventTarget | null, popup: HTMLElement | null): boolean {
+  return target !== document.body && target instanceof Node && !popup?.contains(target);
+}
+
 /**
  * Large modal for the Settings and Usage routes. Esc, the close button, or a press on the
  * backdrop returns to the page that opened it. Keyboard guards that skip dialogs exempt
  * `[data-app-modal]`, because these pages own their shortcuts.
  */
-export function AppRouteModal({ label, children }: { label: string; children: ReactNode }) {
+export function AppRouteModal({
+  label,
+  children,
+  onEscape,
+}: {
+  label: string;
+  children: ReactNode;
+  onEscape?: () => boolean;
+}) {
   const closeAppModal = useCloseAppModal();
   const [open, setOpen] = useState(true);
   // Text selection that ends on the backdrop is not a dismissal.
@@ -47,9 +59,7 @@ export function AppRouteModal({ label, children }: { label: string; children: Re
         const target = eventDetails.event.target;
         if (
           eventDetails.reason === "escape-key" &&
-          target !== document.body &&
-          target instanceof Node &&
-          !popupRef.current?.contains(target)
+          (escapeOutsidePopup(target, popupRef.current) || onEscape?.())
         ) {
           return eventDetails.cancel();
         }

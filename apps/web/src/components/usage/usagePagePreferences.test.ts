@@ -24,9 +24,18 @@ afterEach(() => {
 });
 
 describe("Usage page preferences", () => {
-  it("round-trips hidden providers and reads older saves without them", () => {
-    saveUsagePagePreferences({ metric: "cost", windowDays: 7, hiddenProviders: ["codex"] });
-    expect(readUsagePagePreferences().hiddenProviders).toEqual(["codex"]);
+  it("round-trips usage preferences and reads older saves without a limits layout", () => {
+    const limitsLayout = {
+      providerOrder: ["claudeAgent", "antigravity"],
+      windowOrder: ['["antigravity","weekly","gemini-weekly"]'],
+      hiddenWindows: ['["antigravity","weekly","gemini-argon-wtu-weekly"]'],
+    };
+    const preferences = { metric: "cost", windowDays: 7, hiddenProviders: ["codex"] } as const;
+    saveUsagePagePreferences({ ...preferences, limitsLayout });
+    expect(readUsagePagePreferences()).toEqual({ ...preferences, limitsLayout });
+
+    saveUsagePagePreferences({ ...readUsagePagePreferences(), limitsLayout: undefined });
+    expect(readUsagePagePreferences()).toEqual(preferences);
 
     values.set(key, '{"metric":"tokens","windowDays":30}');
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 30 });
